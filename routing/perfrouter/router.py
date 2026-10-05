@@ -2,16 +2,47 @@ import inspect
 import logging
 import os
 import re
+import time
 import json as _json
 from pathlib import Path
 
 from optmod.routing import BaseRouter
 from optmod.routing.context import RoutingContext
 from optmod.schemas import RoutingDecision
+from optmod.routing.perfrouter.laya_tier import (
+    DEFAULTS as _LAYA_DEFAULTS, TierResult, get_classifier, merge_config as _merge_laya_cfg,
+    target as _laya_target,
+)
 
 _DIR = Path(__file__).parent
 _DEFAULT_COST_WEIGHT = 0.3
 _DEFAULT_BASELINE    = "deepseek/deepseek-v4-pro"
+_LAYA_MODES          = ("off", "shadow", "active")
+
+
+def resolve_tier_params(
+    result: TierResult | None, status: str, mode: str, laya_cfg: dict,
+    static_delta: float, static_cap: float | None,
+) -> tuple[float, float | None, bool]:
+    """
+    Pick (delta, cost_cap, applied) for one request.
+
+    Tier values apply only in active mode, with an `ok` answer at or above
+    min_confidence, and a configured entry for that tier. Otherwise the static
+    values come back with applied=False. cost_cap None means no cap.
+    """
+    if mode != "active" or status != "ok" or result is None:
+        return static_delta, static_cap, False
+    min_conf = float(laya_cfg.get("min_confidence", _LAYA_DEFAULTS["min_confidence"]))
+    if result.confidence < min_conf:
+        return static_delta, static_cap, False
+    tier_cfg = (laya_cfg.get("tiers") or {}).get(result.tier)
+    if not isinstance(tier_cfg, dict):
+        return static_delta, static_cap, False
+    delta = float(tier_cfg.get("delta", static_delta))
+    cap_raw = tier_cfg.get("cost_cap", static_cap)
+    cap = float(cap_raw) if cap_raw is not None else None
+    return delta, cap, True
 
 
 def _normalize(s: str) -> str:
@@ -173,6 +204,24 @@ class PerfRouterRouter(BaseRouter):
         cap_raw = perf_cfg.get("cost_cap_multiplier", 2.0)
         self._cost_cap_multiplier = cap_raw  # None means cap disabled
 
+        # ── Laya difficulty tier (optional) ───────────────────────────────────
+        laya_raw = perf_cfg.get("laya") or {}
+        self._laya_cfg: dict = _merge_laya_cfg(laya_raw)
+        self._laya_mode = str(self._laya_cfg.get("mode") or "off")
+        if self._laya_mode not in _LAYA_MODES:
+            logging.warning("[optmod] Unknown perf_router.laya.mode %r — using off", self._laya_mode)
+            self._laya_mode = "off"
+        for tier_name, tier_cfg in (self._laya_cfg.get("tiers") or {}).items():
+            if isinstance(tier_cfg, dict) and float(tier_cfg.get("delta", 1.0)) <= 0.0:
+                logging.warning(
+                    "[optmod] perf_router.laya.tiers.%s.delta <= 0 switches route() to "
+                    "argmax(utility) mode, not 'best quality'. Use a small positive δ.",
+                    tier_name,
+                )
+        self._laya = None
+        if self._laya_mode != "off":
+            self._ensure_laya()
+
         # ── Data path resolution ──────────────────────────────────────────────
         router_path, taxonomy_path, registry_path, features_path, models_yaml_path = \
             _resolve_data_paths(perf_cfg)
@@ -216,6 +265,35 @@ class PerfRouterRouter(BaseRouter):
             )
         except Exception as exc:
             logging.warning("[optmod] PerfRouterRouter failed to load: %s", exc)
+
+    # ── Laya control ──────────────────────────────────────────────────────────
+
+    def _ensure_laya(self) -> None:
+        if self._laya is not None:
+            return
+        try:
+            self._laya = get_classifier(self._laya_cfg)
+        except Exception as exc:
+            logging.warning("[optmod] Laya tier classifier failed to build: %s", exc)
+            self._laya = None
+
+    def set_laya_mode(self, mode: str) -> None:
+        if mode not in _LAYA_MODES:
+            raise ValueError(f"unknown laya mode: {mode}")
+        self._laya_mode = mode
+        if mode != "off":
+            self._ensure_laya()
+
+    def laya_status(self) -> dict:
+        out = {
+            "mode":       self._laya_mode,
+            "backend":    self._laya_cfg.get("backend"),
+            "target":     _laya_target(self._laya_cfg),
+            "breaker":    "not_loaded",
+        }
+        if self._laya is not None:
+            out.update(self._laya.status())
+        return out
 
     def _find_inference_model_id(self, registry_name: str) -> str | None:
         """Inverse of _resolve_model: registry model name → inference _model_ids entry."""
@@ -285,6 +363,13 @@ class PerfRouterRouter(BaseRouter):
 
         last_3 = user_messages[-3:]
 
+        # Laya sees the same window without the repeated last message (the
+        # repeat is a MiniLM weighting trick). Keep the tail: current turn is last.
+        laya_text = "\n".join(last_3)
+        max_chars = int(self._laya_cfg.get("max_chars") or 0)
+        if max_chars > 0 and len(laya_text) > max_chars:
+            laya_text = laya_text[-max_chars:]
+
         # Repeat last message to weight current intent in the embedding
         if last_3:
             last_3 = last_3 + [last_3[-1]]
@@ -302,18 +387,69 @@ class PerfRouterRouter(BaseRouter):
                     "bonus_weight": self._soft_bonus_weight,
                 }
 
+        # ── Laya difficulty tier ──────────────────────────────────────────────
+        # Below min_similarity, route() takes fallback_ambiguous (cheapest
+        # eligible model) and ignores δ, so the tier cannot act there yet. We
+        # still classify and log it (observe-only) to measure how many hard
+        # queries land in that fallback; pr_routing_mode marks those rows.
+        mode        = self._laya_mode
+        tier_result = None
+        laya_status = "off"
+        laya_ms     = 0.0
+        low_sim     = False
+        if mode != "off":
+            if not routing_text:
+                laya_status = "skipped_empty"
+            else:
+                top = self._perf_router.classify_task(routing_text)
+                low_sim = not top or top[0][1] < self._min_similarity
+                if self._laya is None:
+                    laya_status = "unavailable"
+                else:
+                    t0 = time.perf_counter()
+                    tier_result, laya_status = self._laya.classify(laya_text)
+                    laya_ms = (time.perf_counter() - t0) * 1000
+
+        static_delta = self._degradation_threshold
+        static_cap   = (float(self._cost_cap_multiplier)
+                        if self._cost_cap_multiplier is not None else None)
+        delta, cap_val, applied = resolve_tier_params(
+            tier_result, laya_status, "shadow" if low_sim else mode,
+            self._laya_cfg, static_delta, static_cap,
+        )
+        if (laya_status == "ok" and tier_result is not None
+                and tier_result.confidence < float(self._laya_cfg.get("min_confidence", 0.0))):
+            laya_status = "low_confidence"
+
         # ── Cost cap: None → float("inf") (disabled) ─────────────────────────
-        cap = float(self._cost_cap_multiplier) if self._cost_cap_multiplier is not None else float("inf")
+        cap = cap_val if cap_val is not None else float("inf")
 
         # ── Route ─────────────────────────────────────────────────────────────
         decision = self._perf_router.route(
             routing_text,
             token_count           = token_count,
             has_images            = has_images,
-            degradation_threshold = self._degradation_threshold,
+            degradation_threshold = delta,
             pin_info              = pin_info,
             cost_cap_multiplier   = cap,
         )
+
+        # ── Shadow: what would the tier values have picked? ───────────────────
+        shadow_model = ""
+        if mode == "shadow" and laya_status == "ok" and not low_sim:
+            s_delta, s_cap, s_applied = resolve_tier_params(
+                tier_result, laya_status, "active", self._laya_cfg, static_delta, static_cap,
+            )
+            if s_applied and (s_delta, s_cap) != (static_delta, static_cap):
+                shadow = self._perf_router.route(
+                    routing_text,
+                    token_count           = token_count,
+                    has_images            = has_images,
+                    degradation_threshold = s_delta,
+                    pin_info              = pin_info,
+                    cost_cap_multiplier   = s_cap if s_cap is not None else float("inf"),
+                )
+                shadow_model = shadow.get("decision_model", "")
 
         chosen_id    = decision["decision_model"]
         model        = _resolve_model(0, [chosen_id], ctx.registry)
@@ -325,7 +461,8 @@ class PerfRouterRouter(BaseRouter):
         quality        = decision.get("predicted_quality", 0.5)
         routing_mode   = decision.get("routing_mode", "normal")
         pin_bonus      = decision.get("pin_soft_bonus", 0.0)
-        cap_str        = str(self._cost_cap_multiplier) if self._cost_cap_multiplier is not None else "none"
+        cap_str        = str(cap_val) if cap_val is not None else "none"
+        tier_name      = tier_result.tier if tier_result is not None else ""
 
         return RoutingDecision(
             model       = model,
@@ -335,11 +472,27 @@ class PerfRouterRouter(BaseRouter):
                 f"quality={quality:.3f} "
                 f"cost_saved={cost_saved_pct:+.1f}% "
                 f"α={alpha:.2f} "
-                f"degradation={self._degradation_threshold:.2f} "
+                f"degradation={delta:.2f} "
                 f"mode={routing_mode} "
                 f"pin_soft_bonus={pin_bonus:.3f} "
-                f"cost_cap={cap_str}"
+                f"cost_cap={cap_str} "
+                f"tier={tier_name or '-'} "
+                f"laya={laya_status}"
             ),
             confidence  = float(quality),
             router_name = self.name,
+            meta        = {
+                "pr_task_type":       task_type,
+                "pr_routing_mode":    routing_mode,
+                "pr_top_similarity":  float(decision.get("top_similarity", 0.0)),
+                "laya_status":        laya_status,
+                "laya_tier":          tier_name,
+                "laya_confidence":    float(tier_result.confidence) if tier_result is not None else 0.0,
+                "laya_ms":            round(laya_ms, 2),
+                "laya_cached":        bool(tier_result.cached) if tier_result is not None else False,
+                "laya_applied":       applied,
+                "laya_shadow_model":  shadow_model,
+                "effective_delta":    float(delta),
+                "effective_cost_cap": cap_val,
+            },
         )

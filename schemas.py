@@ -65,6 +65,7 @@ class RoutingDecision:
     reason:      str
     confidence:  float
     router_name: str
+    meta:        dict = field(default_factory=dict)
 
 
 @dataclass
@@ -91,6 +92,19 @@ class LogEntry:
     completion_tokens: int
     cached_tokens:     int = 0
     pin_state:         str = "fresh"
+    # PerfRouter / Laya tier diagnostics (defaults for other routers and pins)
+    pr_task_type:       str = ""
+    pr_routing_mode:    str = ""
+    pr_top_similarity:  float = 0.0
+    laya_status:        str = ""
+    laya_tier:          str = ""
+    laya_confidence:    float = 0.0
+    laya_ms:            float = 0.0
+    laya_cached:        bool = False   # tier served from the classifier memo; laya_ms is then ~0
+    laya_applied:       bool = False
+    laya_shadow_model:  str = ""
+    effective_delta:    float | None = None
+    effective_cost_cap: float | None = None
 
     def to_jsonl(self) -> str:
         return json.dumps(dataclasses.asdict(self))

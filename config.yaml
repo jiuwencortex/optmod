@@ -48,6 +48,27 @@ perf_router:
   min_similarity: 0.20
   baseline: deepseek/deepseek-v4-flash
   cost_cap_multiplier: 2.0     # null to disable cap entirely
+  # Laya difficulty tier: per-request δ and cost cap. Missing block = off.
+  # Tier numbers and min_confidence are placeholders — tune from shadow data.
+  laya:
+    mode: shadow                 # off | shadow | active
+    backend: embedded            # embedded | remote (remote = phase 2, not implemented yet)
+    embedded:                    # laya runs inside the optmod process
+      checkpoint: convaiinnovations/laya   # hub id or local path
+      device: null               # null = let laya choose; or cuda, cuda:0, cpu
+    remote:                      # laya-serve over HTTP (phase 2)
+      base_url: http://127.0.0.1:8000      # localhost or any other URL
+      api_key_env: LAYA_API_KEY            # optional bearer token, read from env
+      model: english             # laya-serve model name: english | multilingual | typed-decisions
+    timeout_ms: 80
+    max_chars: 1500
+    min_confidence: 0.5
+    breaker_failures: 3
+    breaker_cooldown_s: 60
+    tiers:                       # δ must stay > 0 (δ = 0 means argmax utility, not best quality)
+      easy:   { delta: 0.25, cost_cap: 2.0 }
+      medium: { delta: 0.15, cost_cap: 2.0 }
+      hard:   { delta: 0.03, cost_cap: 4.0 }
 
 # ── TRouter policy ────────────────────────────────────────────────────────────
 trouter:
