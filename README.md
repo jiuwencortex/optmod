@@ -25,7 +25,7 @@ The current pool is multi-provider: DeepSeek direct API for the flagship models,
 
 | Tier | Model | Provider | Cost / 1k input |
 |---|---|---|---|
-| fast (0) | `openai/gpt-oss-120b:free` | OpenRouter | $0.0 |
+| fast (0) | `openai/gpt-oss-120b` | OpenRouter | $0.000037 |
 | fast (0) | `nvidia/nemotron-3-super-120b-a12b:free` | OpenRouter | $0.0 |
 | fast (0) | `openai/gpt-4o-mini` | OpenRouter | $0.00015 |
 | reasoning (1) | `deepseek-v4-flash` | DeepSeek | $0.00014 |

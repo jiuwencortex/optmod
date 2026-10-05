@@ -34,7 +34,7 @@ pytestmark = pytest.mark.skipif(
 _LOG_PATH = Path("routing.log.jsonl")
 
 ALL_MODELS = {
-    "openai/gpt-oss-120b:free",
+    "openai/gpt-oss-120b",
     "arcee-ai/trinity-large-thinking",
     "deepseek/deepseek-v4-flash",
 }
@@ -82,7 +82,7 @@ def restore_rule_based(client):
 def test_live_fast_tier(client):
     """
     'Summarize …' with short context → Rule 6 (summarize + tokens < 3000)
-    → fast tier → openai/gpt-oss-120b:free
+    → fast tier → openai/gpt-oss-120b
     """
     r = client.post("/v1/chat/completions", json={
         "model": "optmod",
@@ -92,7 +92,7 @@ def test_live_fast_tier(client):
     _assert_completion(r)
     log = _last_log()
     assert log["router"] == "RuleBasedRouter"
-    assert log["final_model"] == "openai/gpt-oss-120b:free"
+    assert log["final_model"] == "openai/gpt-oss-120b"
     assert log["ok"] is True
 
 

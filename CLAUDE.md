@@ -29,7 +29,7 @@ Primary model: `deepseek-v4-flash` (set via `primary_model` in `config.yaml`).
 
 | Tier | Model | Provider | Cost/1k in | Notes |
 |------|-------|----------|-----------|-------|
-| fast (0) | `openai/gpt-oss-120b:free` | OpenRouter | $0.0 | Free tier |
+| fast (0) | `openai/gpt-oss-120b` | OpenRouter | $0.000037 | |
 | fast (0) | `nvidia/nemotron-3-super-120b-a12b:free` | OpenRouter | $0.0 | Free tier, `thinking_mode=true` |
 | fast (0) | `openai/gpt-4o-mini` | OpenRouter | $0.00015 | |
 | reasoning (1) | `deepseek-v4-flash` | DeepSeek direct | $0.00014 | Primary |
