@@ -54,7 +54,7 @@ def _resolve_model(idx: int, model_ids: list[str], registry):
     """
     Map a model index to a ModelConfig by name matching.
 
-    Copied verbatim from trouter_router.py — same matching strategy,
+    Copied verbatim from trouter/router.py — same matching strategy,
     same fallback to registry.primary.
     """
     if idx >= len(model_ids):

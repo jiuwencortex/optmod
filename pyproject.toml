@@ -43,7 +43,7 @@ asyncio_mode = "auto"
 # package-dir maps the package name to "." so that
 # `from optmod.main import app` resolves to ./main.py, etc.
 [tool.setuptools]
-packages = ["optmod", "optmod.routing", "optmod.mutators"]
+packages = ["optmod", "optmod.routing", "optmod.routing.trouter", "optmod.mutators"]
 
 [tool.setuptools.package-dir]
 optmod = "."

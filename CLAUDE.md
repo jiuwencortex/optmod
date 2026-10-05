@@ -48,7 +48,7 @@ Escalation path: `fast → reasoning → oracle → 502`. Required env vars: `OP
 |------|-------------|
 | `perf_router` | **Default.** Sentence-BERT (`all-MiniLM-L6-v2`) classifies the query into task types, XGBoost predicts per-model quality, then `adjusted_utility = quality − α·cost_norm` picks the winner. Knobs: `perf_router_cost_weight` (α), `perf_router_baseline`, `perf_router_degradation_threshold`, `perf_router_min_similarity`. Loads `routing/perf_router.pkl` + `task_taxonomy.json` + `model_registry.json` + `model_features.csv`. |
 | `rule_based` | 9 deterministic rules (task type, difficulty, language, tokens) |
-| `trouter` | Neural net: sentence-BERT → MLP → model index. Loads `routing/trouter_weights.pt` |
+| `trouter` | Neural net: sentence-BERT → MLP → model index. Loads `routing/trouter/trouter_weights.pt` |
 | `passthrough` | Always uses the primary model. Useful as a baseline |
 | `decision_tree` | scikit-learn tree; falls back to `rule_based` if `routing_policy.pkl` absent |
 
@@ -151,8 +151,8 @@ routing/__init__.py                  BaseRouter ABC + build_router() factory
 routing/passthrough.py               PassthroughRouter — primary model
 routing/rule_based.py                9-rule deterministic router
 routing/decision_tree.py             scikit-learn tree (falls back to rule_based if pkl absent)
-routing/trouter_router.py            TRouter — sentence-BERT + MLP
-routing/train_trouter.py             TRouter training code + standalone route() function
+routing/trouter/router.py             TRouter — sentence-BERT + MLP
+routing/trouter/train_trouter.py      TRouter training code + standalone route() function
 routing/perf_router_router.py        PerfRouter config plumbing; resolves session_pin → inference id
 routing/perf_router_inference.py     PerfRouter inference (sentence-BERT + XGBoost); soft-pin bonus
                                      applied in all three selection branches

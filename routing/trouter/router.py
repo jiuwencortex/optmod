@@ -69,8 +69,8 @@ class TRouterRouter(BaseRouter):
         try:
             import torch
             from sentence_transformers import SentenceTransformer
-            from optmod.routing.train_trouter import build_model
-            from optmod.routing.train_trouter import route as _trouter_route
+            from optmod.routing.trouter.train_trouter import build_model
+            from optmod.routing.trouter.train_trouter import route as _trouter_route
 
             ckpt = torch.load(_WEIGHTS_PATH, weights_only=False, map_location="cpu")
             cfg = ckpt["config"]

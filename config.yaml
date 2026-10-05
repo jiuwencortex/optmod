@@ -72,7 +72,7 @@ perf_router:
 
 # ── TRouter policy ────────────────────────────────────────────────────────────
 trouter:
-  checkpoint: routing/trouter_weights.pt
+  checkpoint: routing/trouter/trouter_weights.pt
 
 # ── Shared ────────────────────────────────────────────────────────────────────
 session_pin:

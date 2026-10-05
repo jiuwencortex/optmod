@@ -168,9 +168,10 @@ routing/
   passthrough.py           PassthroughRouter
   rule_based.py            RuleBasedRouter (9 rules)
   decision_tree.py         DecisionTreeRouter (scikit-learn)
-  trouter_router.py        TRouterRouter (sentence-BERT + MLP)
-  trouter_weights.pt       Trained TRouter checkpoint
-  train_trouter.py         TRouter training code
+  trouter/                 TRouter package
+    router.py              TRouterRouter (sentence-BERT + MLP)
+    trouter_weights.pt     Trained TRouter checkpoint
+    train_trouter.py       TRouter training code
   perf_router_router.py    PerfRouterRouter — config plumbing, session-pin lookup
   perf_router_inference.py PerfRouter inference engine (sentence-BERT + XGBoost)
   perf_router.pkl          Trained PerfRouter checkpoint
