@@ -1,3 +1,5 @@
+import os
+
 import pytest
 import respx
 import httpx
@@ -22,10 +24,24 @@ OK_RESPONSE = {
 }
 
 
+_KEY_ENVS = ["OPENROUTER_API_KEY", "DEEPSEEK_API_KEY", "GOOGLE_API_KEY",
+             "ANTHROPIC_API_KEY", "OPENAI_API_KEY", "MOONSHOT_API_KEY"]
+
+
 @pytest.fixture(scope="module")
 def client():
-    with TestClient(app) as c:
-        yield c
+    # Models whose native provider is not in config.yaml fall back to OpenRouter,
+    # which needs a key at startup. Dummy keys keep the suite independent of .env;
+    # real keys, if present, are left alone. Nothing here touches the network.
+    mp = pytest.MonkeyPatch()
+    for env in _KEY_ENVS:
+        if not os.environ.get(env):
+            mp.setenv(env, "test-key")
+    try:
+        with TestClient(app) as c:
+            yield c
+    finally:
+        mp.undo()
 
 
 @respx.mock
