@@ -26,7 +26,7 @@ from optmod.schemas import OpenAIChatRequest, RoutingContext, RoutingDecision, L
 # RoutingDecision.meta keys copied verbatim into LogEntry
 _META_LOG_FIELDS = (
     "pr_task_type", "pr_routing_mode", "pr_top_similarity",
-    "laya_status", "laya_tier", "laya_confidence", "laya_ms",
+    "laya_status", "laya_tier", "laya_confidence", "laya_ms", "laya_cached",
     "laya_applied", "laya_shadow_model", "effective_delta", "effective_cost_cap",
 )
 from optmod.stats import stats_router

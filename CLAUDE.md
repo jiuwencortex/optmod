@@ -116,7 +116,7 @@ perf_router:
 Each `LogEntry` carries `pr_task_type`, `pr_routing_mode`, `pr_top_similarity`, `laya_status`
 (`off`, `skipped_empty`, `low_confidence`, or a classifier status: `ok`,
 `error`, `timeout`, `breaker_open`, `unavailable`), `laya_tier`, `laya_confidence`, `laya_ms`,
-`laya_applied`, `laya_shadow_model`, `effective_delta`, `effective_cost_cap` — copied from
+`laya_cached` (served from the memo, so `laya_ms` ≈ 0 — ignore it for latency analysis), `laya_applied`, `laya_shadow_model`, `effective_delta`, `effective_cost_cap` — copied from
 `RoutingDecision.meta`. Hard-pinned turns log defaults. Query text is never logged.
 
 ## Mutators

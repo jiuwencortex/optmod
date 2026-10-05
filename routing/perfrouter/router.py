@@ -489,6 +489,7 @@ class PerfRouterRouter(BaseRouter):
                 "laya_tier":          tier_name,
                 "laya_confidence":    float(tier_result.confidence) if tier_result is not None else 0.0,
                 "laya_ms":            round(laya_ms, 2),
+                "laya_cached":        bool(tier_result.cached) if tier_result is not None else False,
                 "laya_applied":       applied,
                 "laya_shadow_model":  shadow_model,
                 "effective_delta":    float(delta),

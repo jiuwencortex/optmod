@@ -273,7 +273,8 @@ transformers 5.9, sentence-transformers 5.5).
 | `laya_status` | `str = ""` | `off`, `skipped_empty`, `low_confidence`, or a classifier status |
 | `laya_tier` | `str = ""` | `easy`, `medium`, `hard`, or empty |
 | `laya_confidence` | `float = 0.0` | |
-| `laya_ms` | `float = 0.0` | Laya wall time for this request |
+| `laya_ms` | `float = 0.0` | Laya wall time for this request (≈ 0 on a memo hit) |
+| `laya_cached` | `bool = False` | Tier came from the classifier memo (escalation retry or repeated text), so `laya_ms` is not a model latency |
 | `laya_applied` | `bool = False` | True only when tier values were used for routing |
 | `laya_shadow_model` | `str = ""` | Shadow mode: model the tier values would have picked |
 | `effective_delta` | `float \| None = None` | δ actually passed to `route()` |

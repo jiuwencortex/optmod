@@ -16,6 +16,7 @@ Backends (perf_router.laya.backend):
 from __future__ import annotations
 
 import copy
+import dataclasses
 import hashlib
 import json
 import logging
@@ -80,7 +81,8 @@ class TierResult:
     tier:          str            # "easy" | "medium" | "hard"
     confidence:    float          # answers["tier"]["answer_confidence"]
     probabilities: dict[str, float]
-    latency_ms:    float
+    latency_ms:    float          # wall time of the model call that produced this result
+    cached:        bool = False   # True when served from the memo (no model call this time)
 
 
 class _Unavailable(Exception):
@@ -195,7 +197,7 @@ class LayaTierClassifier:
             hit = self._memo.get(key)
             if hit is not None:
                 self._memo.move_to_end(key)
-                return hit, "ok"
+                return dataclasses.replace(hit, cached=True), "ok"
             if self._open_until is not None:
                 if self._clock() < self._open_until:
                     return None, "breaker_open"

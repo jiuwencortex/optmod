@@ -100,6 +100,7 @@ class LogEntry:
     laya_tier:          str = ""
     laya_confidence:    float = 0.0
     laya_ms:            float = 0.0
+    laya_cached:        bool = False   # tier served from the classifier memo; laya_ms is then ~0
     laya_applied:       bool = False
     laya_shadow_model:  str = ""
     effective_delta:    float | None = None

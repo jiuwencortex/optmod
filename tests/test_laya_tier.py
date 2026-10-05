@@ -148,9 +148,10 @@ def test_slow_call_returns_result_but_counts_for_breaker():
 def test_memo_calls_backend_once():
     be = FakeBackend()
     clf = _clf(be)
-    r1 = clf.classify("same text")
-    r2 = clf.classify("same text")
-    assert r1 == r2
+    r1, _ = clf.classify("same text")
+    r2, _ = clf.classify("same text")
+    assert (r1.tier, r1.confidence) == (r2.tier, r2.confidence)
+    assert r1.cached is False and r2.cached is True
     assert len(be.calls) == 1
 
 
@@ -388,6 +389,20 @@ def test_laya_text_has_no_repeat_and_is_left_truncated(registry, monkeypatch):
     assert stub.route_calls[0]["query"].count("THE CURRENT TURN") == 2
 
 
+def test_meta_flags_cache_hit(registry, monkeypatch):
+    r = _make_router(monkeypatch, ACTIVE, StubInference(), FakeBackend(_answer("medium", 0.9)))
+    first = r.route(_ctx(registry, "summarise this"))
+    second = r.route(_ctx(registry, "summarise this"))   # e.g. an escalation retry
+    assert first.meta["laya_cached"] is False
+    assert second.meta["laya_cached"] is True
+    assert second.meta["laya_tier"] == "medium"
+
+
+def test_meta_cached_false_when_laya_off(registry, monkeypatch):
+    r = _make_router(monkeypatch, None, StubInference())
+    assert r.route(_ctx(registry, "x")).meta["laya_cached"] is False
+
+
 def test_laya_text_untruncated_joins_last_three(registry, monkeypatch):
     be = FakeBackend()
     r = _make_router(monkeypatch, ACTIVE, StubInference(), be)
@@ -483,7 +498,7 @@ async def test_meta_reaches_jsonl_and_hard_pin_logs_defaults(registry, wired_mai
     meta = {
         "pr_task_type": "coding.debug", "pr_routing_mode": "normal", "pr_top_similarity": 0.61,
         "laya_status": "ok", "laya_tier": "hard", "laya_confidence": 0.9, "laya_ms": 12.5,
-        "laya_applied": True, "laya_shadow_model": "", "effective_delta": 0.03,
+        "laya_cached": True, "laya_applied": True, "laya_shadow_model": "", "effective_delta": 0.03,
         "effective_cost_cap": 4.0,
     }
     monkeypatch.setattr(main, "_router", _MetaRouter(registry, meta))
@@ -503,5 +518,6 @@ async def test_meta_reaches_jsonl_and_hard_pin_logs_defaults(registry, wired_mai
     assert pinned["pin_state"] == "hard"
     assert pinned["laya_status"] == ""
     assert pinned["laya_applied"] is False
+    assert pinned["laya_cached"] is False
     assert pinned["effective_delta"] is None
     assert pinned["effective_cost_cap"] is None
