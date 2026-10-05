@@ -220,6 +220,9 @@ __marimo__/
 .playwright-mcp/
 routing.log.jsonl
 
+# graft's local graph cache — regenerable, not committed (run `graft build`).
+/graft/
+
 # start.sh / stop.sh runtime files
 .optmod.pid
 optmod.out.log
