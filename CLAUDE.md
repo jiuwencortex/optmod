@@ -66,6 +66,59 @@ Pin state is in-memory only (`_session_pins: dict[str, SessionPin]` in `main.py`
 
 Config knobs: `session_pin_hard_window_s`, `session_pin_soft_window_s`, `session_pin_soft_bonus_weight`. Per-model `supports_vision: true` declares vision capability.
 
+## Laya Difficulty Tier (perf_router only)
+
+[Laya](https://github.com/nandhakishorm/laya) (optional extra: `uv pip install -e '.[laya]'`) classifies each
+routed query as `easy` / `medium` / `hard` with one typed `choice` question, and the tier picks the
+per-request δ (`degradation_threshold`) and `cost_cap_multiplier` passed to `PerfRouterInference.route()`.
+
+- **Modes** (`perf_router.laya.mode`): `off` (identical to no block), `shadow` (route with static values;
+  if tier values differ, a second `route()` call records `laya_shadow_model`), `active` (tier values used
+  only when Laya answered `ok` with confidence ≥ `min_confidence`).
+- Laya runs after the hard-pin gate on any non-empty routing text. Below MiniLM `min_similarity` it is
+  **observe-only**: `route()` takes `fallback_ambiguous` (cheapest model, δ ignored), so the tier is logged
+  but never applied (rows have `pr_routing_mode=fallback_ambiguous`). Acting on it is phase 3 in the plan.
+- Input = last 3 user messages **without** the repeated last one, left-truncated to `max_chars`.
+- Backends (`backend:`), each with its own sub-block: `embedded` (phase 1, implemented) runs `laya.load`
+  in-process with a warm-up predict at init; `remote` (phase 2, **not implemented** — reports
+  `unavailable`) will call `laya-serve` at `remote.base_url` (localhost or any URL). Missing package or
+  load failure → status `unavailable`, never an error. Plan: `optmod-spec/plans/laya-difficulty-tier.md`.
+- Guards: wall-time per call; `breaker_failures` consecutive errors/timeouts/slow calls (> `timeout_ms`)
+  open a breaker for `breaker_cooldown_s`; 512-entry SHA-1 memo of `ok` results; one classifier per
+  process per config (router swaps don't reload the checkpoint).
+- Toggle: `POST /optmod/laya/{off|shadow|active}`. Status: `laya` key in `GET /optmod/status`.
+- **δ = 0 is not "best quality"**: in `route()`, δ = 0 switches to `argmax(quality − α·cost_norm)`.
+  The hard tier must use a small positive δ; a warning is logged for any tier with δ ≤ 0.
+
+```yaml
+perf_router:
+  laya:
+    mode: shadow                 # off | shadow | active
+    backend: embedded            # embedded | remote (remote = phase 2)
+    embedded:
+      checkpoint: convaiinnovations/laya
+      device: null               # or cuda, cuda:0, cpu
+    remote:                      # phase 2
+      base_url: http://127.0.0.1:8000
+      api_key_env: LAYA_API_KEY
+      model: english             # laya-serve name, not a hub id
+    timeout_ms: 80
+    max_chars: 1500
+    min_confidence: 0.5
+    breaker_failures: 3
+    breaker_cooldown_s: 60
+    tiers:                       # placeholders — tune from shadow data
+      easy:   { delta: 0.25, cost_cap: 2.0 }
+      medium: { delta: 0.15, cost_cap: 2.0 }
+      hard:   { delta: 0.03, cost_cap: 4.0 }   # cost_cap: null = no cap
+```
+
+Each `LogEntry` carries `pr_task_type`, `pr_routing_mode`, `pr_top_similarity`, `laya_status`
+(`off`, `skipped_empty`, `low_confidence`, or a classifier status: `ok`,
+`error`, `timeout`, `breaker_open`, `unavailable`), `laya_tier`, `laya_confidence`, `laya_ms`,
+`laya_applied`, `laya_shadow_model`, `effective_delta`, `effective_cost_cap` — copied from
+`RoutingDecision.meta`. Hard-pinned turns log defaults. Query text is never logged.
+
 ## Mutators
 
 Post-routing context transforms. `BaseContextMutator.mutate(messages, decision) → new list` — never raise, never modify in-place.
@@ -103,6 +156,7 @@ routing/train_trouter.py             TRouter training code + standalone route() 
 routing/perf_router_router.py        PerfRouter config plumbing; resolves session_pin → inference id
 routing/perf_router_inference.py     PerfRouter inference (sentence-BERT + XGBoost); soft-pin bonus
                                      applied in all three selection branches
+routing/perfrouter/laya_tier.py      LayaTierClassifier (embedded backend; remote = phase 2), breaker, memo, TIER_QUESTION
 routing/perf_router.pkl              Trained PerfRouter checkpoint
 routing/task_taxonomy.json           Task type taxonomy for sentence-BERT classification
 routing/model_registry.json          Per-model metadata (effective context, vision capability)
@@ -117,6 +171,7 @@ tests/test_features.py               Unit tests — FeatureExtractor
 tests/test_escalation.py             Unit tests — EscalationPolicy
 tests/test_session_pin.py            Unit tests — pin helpers, escapes, rehoming, cache extraction
 tests/test_tool_result_compressor.py Unit tests — every compression filter and edge case
+tests/test_laya_tier.py              Unit tests — Laya classifier, resolve_tier_params, router + log plumbing
 tests/test_live_e2e.py               Live tests hitting real providers — skipped if no API key
 ```
 
@@ -137,7 +192,8 @@ tests/test_live_e2e.py               Live tests hitting real providers — skipp
 # Full mock suite (fast, no network)
 uv run pytest tests/test_proxy_e2e.py tests/test_routers.py \
               tests/test_features.py tests/test_escalation.py \
-              tests/test_session_pin.py tests/test_tool_result_compressor.py -v
+              tests/test_session_pin.py tests/test_tool_result_compressor.py \
+              tests/test_laya_tier.py -v
 
 # Live e2e (requires OPENROUTER_API_KEY + DEEPSEEK_API_KEY in .env)
 uv run pytest tests/test_live_e2e.py -v -s
@@ -156,7 +212,8 @@ exercise paths that touch DeepSeek direct.
 | `POST` | `/optmod/restart` | Re-reads `_TIER_MAP` + touches `main.py` for `--reload` |
 | `POST` | `/optmod/router/{name}` | Hot-swap router (`perf_router`, `rule_based`, `trouter`, `passthrough`, `decision_tree`) |
 | `POST` | `/optmod/compressor/{state}` | Toggle the `tool_result_compressor` mutator (`on` / `off`) |
-| `GET` | `/optmod/status` | Current router, primary, model list with costs, `active_pins`, `hard_window_s`, `soft_window_s`, `tool_compressor` |
+| `POST` | `/optmod/laya/{mode}` | Laya tier mode (`off` / `shadow` / `active`); 409 if active router isn't `perf_router` |
+| `GET` | `/optmod/status` | Current router, primary, model list with costs, `active_pins`, `hard_window_s`, `soft_window_s`, `tool_compressor`, `laya` |
 | `GET` | `/api/stats?range=N` | Aggregated stats (1h, 6h, 24h, last-N, all) — includes `cache_hit_rate`, `cached_tokens`, per-model `model_tokens.{prompt,completion,cached}` |
 | `GET` | `/api/stats/live` | Lightweight live counts for polling |
 | `GET` | `/ui` | Live dashboard (5s auto-refresh, includes cache-hit-rate tile + pinned-session counter) |

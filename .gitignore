@@ -219,3 +219,7 @@ __marimo__/
 # playwrite mcp
 .playwright-mcp/
 routing.log.jsonl
+
+# start.sh / stop.sh runtime files
+.optmod.pid
+optmod.out.log

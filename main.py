@@ -22,6 +22,13 @@ from optmod.escalation import EscalationPolicy
 from optmod.forwarder import ModelForwarder
 from optmod.log import RoutingLog
 from optmod.schemas import OpenAIChatRequest, RoutingContext, RoutingDecision, LogEntry, SessionPin
+
+# RoutingDecision.meta keys copied verbatim into LogEntry
+_META_LOG_FIELDS = (
+    "pr_task_type", "pr_routing_mode", "pr_top_similarity",
+    "laya_status", "laya_tier", "laya_confidence", "laya_ms",
+    "laya_applied", "laya_shadow_model", "effective_delta", "effective_cost_cap",
+)
 from optmod.stats import stats_router
 
 _registry:             ModelRegistry       | None = None
@@ -289,6 +296,7 @@ async def chat_completions(raw: Request) -> JSONResponse:
     if error_type is None and decision is not None and _session_pin_enabled:
         _update_pin(session, decision.model.name, cached_tokens, prompt_tokens_val, now)
 
+    meta = decision.meta if decision is not None else {}
     _log.append(LogEntry(
         ts=                _now_iso(),
         session_id=        session,
@@ -312,6 +320,7 @@ async def chat_completions(raw: Request) -> JSONResponse:
         completion_tokens= usage.get("completion_tokens", 0),
         cached_tokens=     cached_tokens,
         pin_state=         pin_state,
+        **{k: meta[k] for k in _META_LOG_FIELDS if k in meta},
     ))
 
     if error_type and not response:
@@ -343,6 +352,9 @@ async def status() -> JSONResponse:
         "active_pins":         active_pins,
         "hard_window_s":       _hard_window_s,
         "soft_window_s":       _soft_window_s,
+        "laya": (
+            _router.laya_status() if hasattr(_router, "laya_status") else {"mode": "off"}
+        ),
         "models": [
             {"name": m.name, "tier": m.tier_name, "cost_per_1k": m.cost_per_1k}
             for m in _registry.all()
@@ -373,6 +385,19 @@ async def set_compressor(state: str) -> JSONResponse:
         return JSONResponse(status_code=400, content={"error": f"unknown state: {state}"})
     _tool_compressor_on = state == "on"
     return JSONResponse(content={"tool_compressor": _tool_compressor_on, "ok": True})
+
+
+@app.post("/optmod/laya/{mode}")
+async def set_laya(mode: str) -> JSONResponse:
+    if mode not in ("off", "shadow", "active"):
+        return JSONResponse(status_code=400, content={"error": f"unknown mode: {mode}"})
+    if not hasattr(_router, "set_laya_mode"):
+        return JSONResponse(
+            status_code=409,
+            content={"error": f"router {_router.name} does not support laya"},
+        )
+    _router.set_laya_mode(mode)
+    return JSONResponse(content={"laya": _router.laya_status(), "ok": True})
 
 
 @app.post("/optmod/session-pin/{state}")

@@ -26,6 +26,9 @@ trouter = [
 perfrouter = [
     "perfrouter",
 ]
+laya = [
+    "laya>=0.3.26",
+]
 
 [tool.uv.sources]
 # Install the sibling perfrouter package directly from disk.
